@@ -74,15 +74,34 @@ function loadEnvFile(path) {
   return env;
 }
 
-function buildChildEnv(spec, inheritDefault) {
+// Replace ${VAR} references in a string using the supplied source env.
+// Missing vars expand to "" (matches common shell substitution semantics) and
+// are logged so misconfiguration is visible.
+function interpolateEnvValue(value, source, contextLabel) {
+  if (typeof value !== "string") return value;
+  return value.replace(/\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g, (_, name) => {
+    const resolved = source[name];
+    if (resolved === undefined) {
+      log(`warning: ${contextLabel} referenced $\{${name}\} which is not defined in the gateway's environment`);
+      return "";
+    }
+    return resolved;
+  });
+}
+
+function buildChildEnv(spec, inheritDefault, childName) {
   const inherit = spec.inheritEnv ?? inheritDefault;
   const base = inherit
     ? { ...process.env }
     : Object.fromEntries(ENV_ALLOWLIST.filter((k) => process.env[k] !== undefined).map((k) => [k, process.env[k]]));
+  const inlineRaw = spec.env || {};
+  const inline = Object.fromEntries(
+    Object.entries(inlineRaw).map(([k, v]) => [k, interpolateEnvValue(v, process.env, `child[${childName}].env.${k}`)])
+  );
   return {
     ...base,
     ...loadEnvFile(spec.envFile),
-    ...(spec.env || {}),
+    ...inline,
   };
 }
 
@@ -95,7 +114,7 @@ function withTimeout(promise, ms, label) {
 }
 
 async function startChild(name, spec, inheritDefault, onDegraded) {
-  const env = buildChildEnv(spec, inheritDefault);
+  const env = buildChildEnv(spec, inheritDefault, name);
   const transport = new StdioClientTransport({
     command: spec.command,
     args: spec.args || [],
@@ -109,6 +128,9 @@ async function startChild(name, spec, inheritDefault, onDegraded) {
     { capabilities: {} }
   );
 
+  // Accept either snake_case (matches Claude Code's .mcp.json convention) or camelCase.
+  const disabledTools = new Set(spec.disabled_tools || spec.disabledTools || []);
+
   const child = {
     name,
     client,
@@ -116,6 +138,7 @@ async function startChild(name, spec, inheritDefault, onDegraded) {
     tools: [],
     resources: [],
     prompts: [],
+    disabledTools,
     degraded: false,
     error: null,
   };
@@ -143,7 +166,12 @@ async function startChild(name, spec, inheritDefault, onDegraded) {
   );
 
   try {
-    child.tools = (await withTimeout(client.listTools(), STARTUP_TIMEOUT_MS, `[${name}] listTools`)).tools || [];
+    const rawTools = (await withTimeout(client.listTools(), STARTUP_TIMEOUT_MS, `[${name}] listTools`)).tools || [];
+    child.tools = rawTools.filter((t) => !disabledTools.has(t.name));
+    const hidden = rawTools.length - child.tools.length;
+    if (hidden > 0) {
+      log(`[${name}] hiding ${hidden} disabled tool(s): ${[...disabledTools].join(", ")}`);
+    }
   } catch (e) {
     log(`[${name}] listTools failed: ${e.message}`);
   }
@@ -283,6 +311,11 @@ async function main() {
     if (!child) throw new Error(`Tool not found: ${name}`);
     if (child.degraded) {
       throw new Error(`Tool ${name} unavailable: child ${child.name} is degraded (${child.error || "no error recorded"})`);
+    }
+    // Defense-in-depth: tools filtered at listTools already won't appear in toolMap,
+    // but verify here too in case a stale map entry survives configuration changes.
+    if (child.disabledTools?.has(name)) {
+      throw new Error(`Tool ${name} is disabled for child ${child.name} by gateway config`);
     }
 
     const start = Date.now();

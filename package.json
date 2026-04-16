@@ -1,6 +1,6 @@
 {
   "name": "@devli13/mcp-gateway",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "An MCP gateway that aggregates many child MCP servers behind a single stdio interface. One config, every tool, every model — works with Claude Code, Gemini CLI, and any MCP-compatible client.",
   "type": "module",
   "main": "server.js",

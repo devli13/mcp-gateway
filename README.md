@@ -17,6 +17,8 @@ Designed for multi-agent setups where keeping per-model MCP configs (`.mcp.json`
 - **Failure isolation** -- if a child crashes (at startup or mid-session), the gateway marks it degraded, keeps serving the remaining children, and returns clean errors for the dead child's tools instead of hanging.
 - **Built-in `gateway_health` tool** -- agents can introspect the live status of every child MCP without leaving the conversation.
 - **Tool name collision detection** -- by default, refuses to start if two children export the same tool name. Override with `"onCollision": "first-wins"` if you need to.
+- **Per-tool disable list** -- each child can declare `disabled_tools` to hide specific tools from `tools/list` and reject direct calls. Useful for enforcing safety rails (e.g. blocking destructive Twitter actions while allowing read-only ones).
+- **`${VAR}` env interpolation** -- inline `env` values support `${VAR}` substitution from the gateway's own environment, so secrets handed to the gateway by a parent process (systemd, a launcher, etc.) can be referenced by name without having to copy them into a file.
 - **Bounded shutdown** -- `SIGTERM`/`SIGINT`/`SIGQUIT` close all children in parallel with a per-child timeout, then force-kill anything that hangs.
 - **Works with Claude Code, Gemini CLI, and any MCP-compatible client.**
 
@@ -100,10 +102,11 @@ Per-child fields under `mcpServers.<name>`:
 |---|---|---|
 | `command` | Yes | Executable to spawn (e.g. `npx`, `node`, `python`) |
 | `args` | No | Arguments passed to the command |
-| `env` | No | Inline env vars merged into the child's environment (highest precedence) |
+| `env` | No | Inline env vars merged into the child's environment (highest precedence). Values may reference gateway-process env vars via `${VAR}` syntax; missing vars expand to `""` and log a warning. |
 | `envFile` | No | Path to a `KEY=VAL` file loaded into the child's environment. Lines starting with `#`, blank lines, and an optional leading `export ` are ignored. Single- or double-quoted values are unwrapped. Designed for systemd-credential-style files; no dotenv-style escape sequences or interpolation. |
 | `cwd` | No | Working directory for the child process |
 | `inheritEnv` | inherits top-level | If `true`, this specific child gets full `process.env` inheritance. Useful if a child needs ambient credentials. |
+| `disabled_tools` (alias `disabledTools`) | No | Array of tool names to hide. Tools listed here are filtered out of `tools/list` and rejected on direct `tools/call`. Matches Claude Code's `.mcp.json` convention. |
 
 ## Environment
 

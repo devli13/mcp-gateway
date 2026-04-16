@@ -297,6 +297,119 @@ describe('@devli13/mcp-gateway smoke tests', () => {
     }
   });
 
+  it('resolves ${VAR} interpolation in child env from the gateway process env', async () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), 'mcp-gw-'));
+    const cfgPath = join(tmpDir, 'gateway.config.json');
+    const envReader = join(__dirname, 'fixtures', 'env-reader-mcp.js');
+    writeFileSync(
+      cfgPath,
+      JSON.stringify({
+        mcpServers: {
+          reader: {
+            command: 'node',
+            args: [envReader],
+            env: {
+              RESOLVED_SECRET: '${GATEWAY_TEST_SECRET}',
+              LITERAL_VALUE: 'plain-text',
+            },
+          },
+        },
+      })
+    );
+    try {
+      const proc = spawn('node', [SERVER], {
+        env: {
+          PATH: process.env.PATH,
+          MCP_GATEWAY_CONFIG: cfgPath,
+          GATEWAY_TEST_SECRET: 'resolved-from-parent-env',
+        },
+        stdio: ['pipe', 'pipe', 'pipe'],
+        cwd: tmpDir,
+      });
+      await jsonRpcRequest(proc, {
+        jsonrpc: '2.0', id: 1, method: 'initialize',
+        params: {
+          protocolVersion: '2024-11-05',
+          capabilities: {},
+          clientInfo: { name: 'smoke-test', version: '0.0.1' },
+        },
+      });
+      const resolved = await jsonRpcRequest(proc, {
+        jsonrpc: '2.0', id: 2, method: 'tools/call',
+        params: { name: 'read_env', arguments: { key: 'RESOLVED_SECRET' } },
+      });
+      assert.equal(resolved.result.content[0].text, 'resolved-from-parent-env');
+
+      const literal = await jsonRpcRequest(proc, {
+        jsonrpc: '2.0', id: 3, method: 'tools/call',
+        params: { name: 'read_env', arguments: { key: 'LITERAL_VALUE' } },
+      });
+      assert.equal(literal.result.content[0].text, 'plain-text');
+
+      // Parent env vars NOT listed in the child env spec must not leak through.
+      const leaked = await jsonRpcRequest(proc, {
+        jsonrpc: '2.0', id: 4, method: 'tools/call',
+        params: { name: 'read_env', arguments: { key: 'GATEWAY_TEST_SECRET' } },
+      });
+      assert.equal(leaked.result.content[0].text, '<undefined>',
+        'parent env must not leak into child unless explicitly referenced');
+
+      proc.kill();
+    } finally {
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('hides tools listed in disabled_tools and rejects direct calls', async () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), 'mcp-gw-'));
+    const cfgPath = join(tmpDir, 'gateway.config.json');
+    const mock = join(__dirname, 'fixtures', 'mock-mcp.js');
+    writeFileSync(
+      cfgPath,
+      JSON.stringify({
+        mcpServers: {
+          muzzled: {
+            command: 'node',
+            args: [mock],
+            disabled_tools: ['mock_echo'],
+          },
+        },
+      })
+    );
+    try {
+      const proc = spawn('node', [SERVER], {
+        env: { PATH: process.env.PATH, MCP_GATEWAY_CONFIG: cfgPath },
+        stdio: ['pipe', 'pipe', 'pipe'],
+        cwd: tmpDir,
+      });
+      await jsonRpcRequest(proc, {
+        jsonrpc: '2.0', id: 1, method: 'initialize',
+        params: {
+          protocolVersion: '2024-11-05',
+          capabilities: {},
+          clientInfo: { name: 'smoke-test', version: '0.0.1' },
+        },
+      });
+      const toolsResp = await jsonRpcRequest(proc, {
+        jsonrpc: '2.0', id: 2, method: 'tools/list',
+      });
+      const names = toolsResp.result.tools.map((t) => t.name);
+      assert.ok(!names.includes('mock_echo'), 'disabled tool must not appear in tools/list');
+      assert.ok(names.includes('gateway_health'), 'gateway_health still available');
+
+      const callResp = await jsonRpcRequest(proc, {
+        jsonrpc: '2.0', id: 3, method: 'tools/call',
+        params: { name: 'mock_echo', arguments: { text: 'should fail' } },
+      });
+      assert.ok(callResp.error || callResp.result?.isError,
+        'direct call to disabled tool must return an error');
+
+      proc.kill();
+    } finally {
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
   it('isolates failures when a child crashes mid-session', async () => {
     const tmpDir = mkdtempSync(join(tmpdir(), 'mcp-gw-'));
     const cfgPath = join(tmpDir, 'gateway.config.json');
