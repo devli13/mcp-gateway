@@ -1,0 +1,50 @@
+{
+  "name": "@devli13/mcp-gateway",
+  "version": "0.1.0",
+  "description": "An MCP gateway that aggregates many child MCP servers behind a single stdio interface. One config, every tool, every model — works with Claude Code, Gemini CLI, and any MCP-compatible client.",
+  "type": "module",
+  "main": "server.js",
+  "bin": {
+    "mcp-gateway": "server.js"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test test/smoke.test.js",
+    "lint": "node --check server.js"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "gateway",
+    "aggregator",
+    "proxy",
+    "claude",
+    "gemini",
+    "ai-agents"
+  ],
+  "author": "devli13",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/devli13/mcp-gateway.git"
+  },
+  "bugs": {
+    "url": "https://github.com/devli13/mcp-gateway/issues"
+  },
+  "homepage": "https://github.com/devli13/mcp-gateway#readme",
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "~1.29.0"
+  },
+  "files": [
+    "server.js",
+    "README.md",
+    "LICENSE",
+    "example-config.json"
+  ],
+  "publishConfig": {
+    "access": "public"
+  }
+}

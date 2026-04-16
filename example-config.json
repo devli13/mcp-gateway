@@ -1,0 +1,19 @@
+{
+  "mcpServers": {
+    "paperclip": {
+      "command": "npx",
+      "args": ["-y", "@devli13/mcp-paperclip"],
+      "envFile": "/run/paperclip/mcp/paperclip.env"
+    },
+    "granola": {
+      "command": "npx",
+      "args": ["-y", "@devli13/mcp-granola"],
+      "envFile": "/run/paperclip/mcp/granola.env"
+    },
+    "ga4": {
+      "command": "npx",
+      "args": ["-y", "@devli13/mcp-ga4"],
+      "envFile": "/run/paperclip/mcp/ga4.env"
+    }
+  }
+}
