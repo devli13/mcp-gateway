@@ -197,7 +197,12 @@ async function main() {
   const specs = config.mcpServers || {};
   const onCollision = config.onCollision || "fail"; // "fail" | "first-wins"
   const inheritEnvDefault = config.inheritEnv === true;
-  log(`loading ${Object.keys(specs).length} child MCPs from ${CONFIG_PATH}`);
+  const prefixTools = config.prefixTools === true;
+  const prefixSeparator = config.prefixSeparator || "__";
+  log(`loading ${Object.keys(specs).length} child MCPs from ${CONFIG_PATH}${prefixTools ? ` (prefixTools=on, separator='${prefixSeparator}')` : ""}`);
+
+  const displayToolName = (childName, toolName) =>
+    prefixTools ? `${childName}${prefixSeparator}${toolName}` : toolName;
 
   const server = new Server(
     { name: "@devli13/mcp-gateway", version: VERSION },
@@ -231,6 +236,7 @@ async function main() {
     }
   }
 
+  // toolMap: displayName -> { child, originalName }
   const toolMap = new Map();
   const resourceMap = new Map();
   const promptMap = new Map();
@@ -239,10 +245,11 @@ async function main() {
   for (const c of children) {
     if (c.degraded) continue;
     for (const t of c.tools) {
-      if (toolMap.has(t.name)) {
-        collisions.push(`tool:${t.name} (kept=${toolMap.get(t.name).name}, conflict=${c.name})`);
+      const disp = displayToolName(c.name, t.name);
+      if (toolMap.has(disp)) {
+        collisions.push(`tool:${disp} (kept=${toolMap.get(disp).child.name}, conflict=${c.name})`);
       } else {
-        toolMap.set(t.name, c);
+        toolMap.set(disp, { child: c, originalName: t.name });
       }
     }
     for (const r of c.resources) {
@@ -275,7 +282,9 @@ async function main() {
     const tools = [];
     for (const c of children) {
       if (c.degraded) continue;
-      for (const t of c.tools) tools.push(t);
+      for (const t of c.tools) {
+        tools.push({ ...t, name: displayToolName(c.name, t.name) });
+      }
     }
     tools.push({
       name: "gateway_health",
@@ -307,24 +316,25 @@ async function main() {
       };
     }
 
-    const child = toolMap.get(name);
-    if (!child) throw new Error(`Tool not found: ${name}`);
+    const entry = toolMap.get(name);
+    if (!entry) throw new Error(`Tool not found: ${name}`);
+    const { child, originalName } = entry;
     if (child.degraded) {
       throw new Error(`Tool ${name} unavailable: child ${child.name} is degraded (${child.error || "no error recorded"})`);
     }
     // Defense-in-depth: tools filtered at listTools already won't appear in toolMap,
     // but verify here too in case a stale map entry survives configuration changes.
-    if (child.disabledTools?.has(name)) {
+    if (child.disabledTools?.has(originalName)) {
       throw new Error(`Tool ${name} is disabled for child ${child.name} by gateway config`);
     }
 
     const start = Date.now();
     try {
-      const result = await child.client.callTool({ name, arguments: args });
-      log(`tool ${name} via ${child.name} OK ${Date.now() - start}ms`);
+      const result = await child.client.callTool({ name: originalName, arguments: args });
+      log(`tool ${name} -> ${child.name}.${originalName} OK ${Date.now() - start}ms`);
       return result;
     } catch (e) {
-      log(`tool ${name} via ${child.name} ERR ${Date.now() - start}ms: ${e.message}`);
+      log(`tool ${name} -> ${child.name}.${originalName} ERR ${Date.now() - start}ms: ${e.message}`);
       throw e;
     }
   });

@@ -410,6 +410,63 @@ describe('@devli13/mcp-gateway smoke tests', () => {
     }
   });
 
+  it('prefixes tool names with child-name when prefixTools=true', async () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), 'mcp-gw-'));
+    const cfgPath = join(tmpDir, 'gateway.config.json');
+    const mockA = join(__dirname, 'fixtures', 'mock-mcp.js');
+    const mockB = join(__dirname, 'fixtures', 'echo-twin-mcp.js');
+    writeFileSync(
+      cfgPath,
+      JSON.stringify({
+        prefixTools: true,
+        mcpServers: {
+          alpha: { command: 'node', args: [mockA] },
+          beta: { command: 'node', args: [mockB] },
+        },
+      })
+    );
+    try {
+      const proc = spawn('node', [SERVER], {
+        env: { PATH: process.env.PATH, MCP_GATEWAY_CONFIG: cfgPath },
+        stdio: ['pipe', 'pipe', 'pipe'],
+        cwd: tmpDir,
+      });
+      await jsonRpcRequest(proc, {
+        jsonrpc: '2.0', id: 1, method: 'initialize',
+        params: {
+          protocolVersion: '2024-11-05',
+          capabilities: {},
+          clientInfo: { name: 'smoke-test', version: '0.0.1' },
+        },
+      });
+      const toolsResp = await jsonRpcRequest(proc, {
+        jsonrpc: '2.0', id: 2, method: 'tools/list',
+      });
+      const names = toolsResp.result.tools.map((t) => t.name).sort();
+      assert.deepEqual(
+        names,
+        ['alpha__mock_echo', 'beta__mock_echo', 'gateway_health'],
+        'both echos exposed under distinct prefixed names'
+      );
+
+      const a = await jsonRpcRequest(proc, {
+        jsonrpc: '2.0', id: 3, method: 'tools/call',
+        params: { name: 'alpha__mock_echo', arguments: { text: 'hi' } },
+      });
+      assert.equal(a.result.content[0].text, 'echo: hi', 'alpha routed to mock-mcp');
+
+      const b = await jsonRpcRequest(proc, {
+        jsonrpc: '2.0', id: 4, method: 'tools/call',
+        params: { name: 'beta__mock_echo', arguments: { text: 'hi' } },
+      });
+      assert.equal(b.result.content[0].text, 'twin: hi', 'beta routed to echo-twin-mcp');
+
+      proc.kill();
+    } finally {
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
   it('isolates failures when a child crashes mid-session', async () => {
     const tmpDir = mkdtempSync(join(tmpdir(), 'mcp-gw-'));
     const cfgPath = join(tmpDir, 'gateway.config.json');

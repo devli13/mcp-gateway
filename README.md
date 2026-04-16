@@ -94,6 +94,8 @@ Top-level keys:
 |---|---|---|
 | `mcpServers` | `{}` | Map of child-name → child spec (see below) |
 | `onCollision` | `"fail"` | Behaviour when two children export the same tool/resource/prompt name. `"fail"` aborts startup with a clear error. `"first-wins"` keeps the first-loaded entry and logs a warning. |
+| `prefixTools` | `false` | If `true`, every tool is exposed as `<childName><prefixSeparator><toolName>`. Lets two children safely export the same raw tool name (e.g. three different `generate` tools from `gemini`, `local_llm`, `fal`). |
+| `prefixSeparator` | `"__"` | String used to join child name and tool name when `prefixTools` is enabled. Double-underscore matches Claude Code's internal namespace convention. |
 | `inheritEnv` | `false` | If `true`, every child inherits the gateway's full `process.env` by default. Otherwise a minimal allowlist is used. Per-child `inheritEnv` overrides this. |
 
 Per-child fields under `mcpServers.<name>`:
