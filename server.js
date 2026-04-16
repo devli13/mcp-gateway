@@ -217,24 +217,29 @@ async function main() {
     }
   };
 
-  const children = [];
-  for (const [name, spec] of Object.entries(specs)) {
-    try {
-      children.push(await startChild(name, spec, inheritEnvDefault, () => notifyToolsChanged()));
-    } catch (e) {
-      log(`[${name}] FAILED to start: ${e.message}`);
-      children.push({
-        name,
-        client: null,
-        transport: null,
-        tools: [],
-        resources: [],
-        prompts: [],
-        degraded: true,
-        error: e.message,
-      });
-    }
-  }
+  // Spawn children in parallel so total startup time = slowest child, not sum of all.
+  // A sequential loop across 10+ children would exceed Claude Code's MCP connect timeout.
+  const entries = Object.entries(specs);
+  const settled = await Promise.allSettled(
+    entries.map(([name, spec]) =>
+      startChild(name, spec, inheritEnvDefault, () => notifyToolsChanged())
+    )
+  );
+  const children = settled.map((r, i) => {
+    const [name] = entries[i];
+    if (r.status === "fulfilled") return r.value;
+    log(`[${name}] FAILED to start: ${r.reason?.message ?? r.reason}`);
+    return {
+      name,
+      client: null,
+      transport: null,
+      tools: [],
+      resources: [],
+      prompts: [],
+      degraded: true,
+      error: r.reason?.message ?? String(r.reason),
+    };
+  });
 
   // toolMap: displayName -> { child, originalName }
   const toolMap = new Map();
